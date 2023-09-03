@@ -118,14 +118,18 @@ class BCAgent(base_agent.BaseAgent):
 
         ## a) sample an action from the policy
         # placeholder
-        a_space = self._env.get_action_space()
-        a = torch.zeros(a_space.shape, device=self._device)
+        a = torch.zeros([self._env.compute_act_shape()], device=self._device)
+        norm_obs = self._obs_norm.normalize(obs)
+        a_dist = self._model.eval_actor(norm_obs)
+        norm_a = a_dist.sample()
+        norm_a = norm_a.detach()
+        a = self._a_norm.unnormalize(norm_a)
+        
         
         ## b) query the expert for an action
         # placeholder
-        a_space = self._env.get_action_space()
-        expert_a = torch.zeros(a_space.shape, device=self._device)
-
+        expert_a = torch.zeros([self._env.compute_act_shape()], device=self._device)
+        expert_a = self._eval_expert(obs)
         a_info = {
             "expert_a": expert_a
         }
@@ -137,4 +141,6 @@ class BCAgent(base_agent.BaseAgent):
         '''
         # placeholder
         loss = torch.zeros(1)
+        norm_a_dist = self._model.eval_actor(norm_obs)
+        loss = -torch.mean(norm_a_dist.log_prob(norm_expert_a))
         return loss
