@@ -79,8 +79,11 @@ class PGAgent(base_agent.BaseAgent):
             norm_a = norm_action_dist.mode
         else:
             assert(False), "Unsupported agent mode: {}".format(self._mode)
-        
+            
+        norm_a_logp = norm_action_dist.log_prob(norm_a)
+
         norm_a = norm_a.detach()
+        norm_a_logp = norm_a_logp.detach()
         a = self._a_norm.unnormalize(norm_a)
 
         info = dict()
@@ -104,6 +107,7 @@ class PGAgent(base_agent.BaseAgent):
         adv_std, adv_mean = torch.std_mean(adv)
         norm_adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-5)
         norm_adv = torch.clamp(norm_adv, -self._norm_adv_clip, self._norm_adv_clip)
+
 
         self._exp_buffer.set_data("tar_val", ret)
         self._exp_buffer.set_data("adv", norm_adv)
@@ -152,6 +156,7 @@ class PGAgent(base_agent.BaseAgent):
 
         loss = self._calc_critic_loss(norm_obs, tar_val)
 
+
         self._critic_optimizer.zero_grad()
         loss.backward()
         self._critic_optimizer.step()
@@ -195,6 +200,15 @@ class PGAgent(base_agent.BaseAgent):
         
         # placeholder
         return_t = torch.zeros_like(r)
+        discount = self._discount 
+        
+        return_t[-1] = r[-1]   
+        iter = r.shape[0]
+        for i in range(iter-2, -1, -1):
+            if not done[i]:
+                return_t[i] = r[i] + discount * return_t[i+1]
+            else:
+                return_t[i] = r[i]
         return return_t
 
     def _calc_adv(self, norm_obs, ret):
@@ -205,6 +219,8 @@ class PGAgent(base_agent.BaseAgent):
         
         # placeholder
         adv = torch.zeros_like(ret)
+        
+        adv = ret - self._model.eval_critic(norm_obs).squeeze().detach() 
         return adv
 
     def _calc_critic_loss(self, norm_obs, tar_val):
@@ -215,7 +231,11 @@ class PGAgent(base_agent.BaseAgent):
         '''
         
         # placeholder
-        loss = torch.zeros(1)
+        #loss = torch.zeros(1)
+        pred_val = self._model.eval_critic(norm_obs).squeeze()
+
+        loss = torch.mean((pred_val-tar_val) ** 2)
+
         return loss
 
     def _calc_actor_loss(self, norm_obs, norm_a, adv):
@@ -226,5 +246,12 @@ class PGAgent(base_agent.BaseAgent):
         '''
         
         # placeholder
-        loss = torch.zeros(1)
+        #loss = torch.zeros(1)
+        
+        action_dist = self._model.eval_actor(norm_obs)
+        log_probability = action_dist.log_prob(norm_a)
+        
+        loss = -torch.mean(adv * log_probability)
+
+
         return loss

@@ -103,6 +103,9 @@ class CEMAgent(base_agent.BaseAgent):
 
         # placeholder
         candidates = torch.zeros([n, param_size], device=self._device)
+        
+        dist = torch.distributions.normal.Normal(self._param_mean, self._param_std)        
+        candidates = dist.sample((n,))
 
         return candidates
 
@@ -116,10 +119,20 @@ class CEMAgent(base_agent.BaseAgent):
         in the output variables rets and ep_lens.
         '''
         n = candidates.shape[0]
-
+        
         # placeholder
         rets = np.zeros(n)
         ep_lens = np.zeros(n)
+        
+        for i in range(n):
+            torch.nn.utils.vector_to_parameters(candidates[i], self._model.parameters())
+            num_eps = self._eps_per_candidate
+            test_info = self._rollout_test(num_eps)
+            
+            '''rets[i] = np.mean(returns)'''
+            '''ep_lens[i] = np.mean(episode_lengths)'''
+            rets[i] = test_info["mean_return"]
+            ep_lens[i] = test_info["mean_ep_len"]
 
         return rets, ep_lens
 
@@ -135,5 +148,23 @@ class CEMAgent(base_agent.BaseAgent):
         # placeholder
         new_mean = torch.zeros(param_size, device=self._device)
         new_std = torch.ones(param_size, device=self._device)
+        
+        elite_sample_size = int(params.shape[0]*self._elite_ratio)
+        
+        
+        rets_tensor = torch.from_numpy(rets)
+        elite_indices = torch.topk(rets_tensor, elite_sample_size).indices
+        'elite_indices = torch.topk(rets, elite_sample_size).indices'
+        elite_params = params[elite_indices]
+        '''elite_indices = torch.argsort(rets)[-elite_sample_size:]
+        elite_params = params[elite_indices]'''
+        
+        new_mean = torch.mean(elite_params, dim=0)
+        new_std = torch.std(elite_params, dim=0)
+        
+        # Clamp the standard deviation to a minimum value
+        new_std = torch.clamp(new_std, min=self._min_param_std)
 
         return new_mean, new_std
+    
+    
